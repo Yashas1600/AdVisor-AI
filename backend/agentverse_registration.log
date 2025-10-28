@@ -1,0 +1,1 @@
+INFO:httpx:HTTP Request: GET https://ltsnoprnomhaoilufuhb.supabase.co/rest/v1/personas?select=%2A&limit=1000 "HTTP/2 200 OK"

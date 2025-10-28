@@ -1,0 +1,76 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SubredditPostExtraction",
+    "type": "object",
+    "properties": {
+      "subreddit": {
+        "type": "string",
+        "description": "The name of the subreddit, e.g., \"r/Fitness\""
+      },
+      "scrape_timestamp": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO 8601 timestamp when the data was scraped"
+      },
+      "posts": {
+        "type": "array",
+        "description": "List of extracted posts from the subreddit",
+        "items": {
+          "type": "object",
+          "properties": {
+            "post_id": {
+              "type": "string",
+              "description": "Unique Reddit identifier for the post"
+            },
+            "title": {
+              "type": "string",
+              "description": "Title of the post"
+            },
+            "body": {
+              "type": "string",
+              "description": "Body / main text of the post (may be empty)"
+            },
+            "upvotes": {
+              "type": "integer",
+              "description": "Number of upvotes for the post"
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time",
+              "description": "When the post was created"
+            },
+            "top_comments": {
+              "type": "array",
+              "description": "Top comments for this post (up to top 25)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "comment_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the comment"
+                  },
+                  "body": {
+                    "type": "string",
+                    "description": "Text of the comment"
+                  },
+                  "upvotes": {
+                    "type": "integer",
+                    "description": "Number of upvotes the comment received"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "When the comment was posted"
+                  }
+                },
+                "required": ["comment_id","body","upvotes","timestamp"]
+              },
+              "maxItems": 25
+            }
+          },
+          "required": ["post_id","title","upvotes","timestamp","top_comments"]
+        }
+      }
+    },
+    "required": ["subreddit","scrape_timestamp","posts"]
+  }
