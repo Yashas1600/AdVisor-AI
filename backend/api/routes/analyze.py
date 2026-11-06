@@ -46,6 +46,8 @@ class PersonaAnalysisResult(BaseModel):
     persona_name: str
     insight: str
     attention: str  # "full", "partial", "ignore"
+    skip_at_seconds: Optional[float] = None
+    moment: Optional[str] = None
 
 
 class AdAnalysisResponse(BaseModel):
@@ -56,7 +58,7 @@ class AdAnalysisResponse(BaseModel):
     summary: Dict[str, Any]
 
 
-# JSON schema for persona ad reaction
+# JSON schema for persona ad reaction (image ads)
 _REACTION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -69,8 +71,23 @@ _REACTION_SCHEMA = {
     "required": ["attention", "insight"],
 }
 
+# JSON schema for video ads (adds skip_at_seconds and moment)
+_VIDEO_REACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "attention": {
+            "type": "string",
+            "enum": ["full", "partial", "ignore"],
+        },
+        "insight": {"type": "string"},
+        "skip_at_seconds": {"type": ["number", "null"]},
+        "moment": {"type": ["string", "null"]},
+    },
+    "required": ["attention", "insight"],
+}
 
-def _build_persona_prompt(persona: Dict[str, Any]) -> str:
+
+def _build_persona_prompt(persona: Dict[str, Any], is_video: bool = False) -> str:
     """Build system prompt for a persona."""
     demographics = persona.get('demographics', {})
     psychographics = persona.get('psychographics', {})
@@ -88,6 +105,15 @@ def _build_persona_prompt(persona: Dict[str, Any]) -> str:
         except Exception:
             psychographics = {}
 
+    json_hint = ('{\n'
+        '  "attention": "full" | "partial" | "ignore",\n'
+        '  "insight": "A single sentence explaining your reaction as this persona"')
+    if is_video:
+        json_hint += (',\n'
+            '  "skip_at_seconds": <number or null - the second you would stop watching, null if you watch the whole thing>,\n'
+            '  "moment": "<the key moment in the video you react to most, or null>"')
+    json_hint += '\n}'
+
     return f"""You are embodying this persona:
 Name: {persona.get('name', 'Unknown')}
 Summary: {persona.get('summary', '')}
@@ -97,7 +123,8 @@ Pain Points: {', '.join(pain_points) if pain_points else 'None'}
 Motivations: {', '.join(motivations) if motivations else 'None'}
 
 You are reviewing an advertisement. Respond authentically from this persona's perspective.
-Your response must be valid JSON with keys "attention" and "insight".
+Your response must be valid JSON with this format:
+{json_hint}
 
 Attention levels:
 - "full": This ad is highly relevant and compelling to you
@@ -108,25 +135,64 @@ Be honest and specific based on your persona's demographics, values, and pain po
 
 
 def _build_ad_prompt(feature_vector: Dict[str, Any]) -> str:
-    """Build user prompt from ad features."""
+    """Build user prompt from ad features, including video timeline if present."""
     moondream = feature_vector.get('moondream', {})
+    gemini = feature_vector.get('gemini', {})
     features = feature_vector.get('features', {})
+    gemini_timeline = feature_vector.get('gemini_timeline')
 
-    return f"""Analyze this advertisement:
+    # Use gemini data if available, fallback to moondream
+    creative_data = gemini if gemini else moondream
 
-CREATIVE SUMMARY: {moondream.get('summary', 'N/A')}
-CAPTION: {moondream.get('caption', 'N/A')}
-CALL TO ACTION: {moondream.get('cta', 'N/A')}
-KEYWORDS: {', '.join(moondream.get('keywords', []))}
-TARGET AUDIENCE: {moondream.get('target_audience', 'N/A')}
+    lines = ["Analyze this advertisement:\n"]
+    lines.append(f"CREATIVE SUMMARY: {creative_data.get('summary', 'N/A')}")
+    lines.append(f"CAPTION: {creative_data.get('caption', 'N/A')}")
+    lines.append(f"CALL TO ACTION: {creative_data.get('cta', 'N/A')}")
+    keywords = creative_data.get('keywords', [])
+    lines.append(f"KEYWORDS: {', '.join(keywords) if keywords else 'N/A'}")
+    lines.append(f"TARGET AUDIENCE: {creative_data.get('target_audience', 'N/A')}")
 
-VISUAL FEATURES:
-- Colors: {features.get('color', {}).get('palette_hex', [])}
-- Colorfulness: {features.get('color', {}).get('colorfulness', 'N/A')}
-- Aspect Ratio: {features.get('layout', {}).get('aspect_ratio', 'N/A')}
-- Whitespace: {features.get('layout', {}).get('whitespace_ratio', 'N/A')}
+    lines.append("\nVISUAL FEATURES:")
+    lines.append(f"- Colors: {features.get('color', {}).get('palette_hex', [])}")
+    lines.append(f"- Colorfulness: {features.get('color', {}).get('colorfulness', 'N/A')}")
+    lines.append(f"- Aspect Ratio: {features.get('layout', {}).get('aspect_ratio', 'N/A')}")
+    lines.append(f"- Whitespace: {features.get('layout', {}).get('whitespace_ratio', 'N/A')}")
 
-How would YOU as this persona react to this ad? Provide your response in JSON format."""
+    if gemini_timeline:
+        lines.append(f"\nVIDEO TIMELINE ({gemini_timeline.get('duration_seconds', 0):.1f}s, pacing: {gemini_timeline.get('pacing', 'N/A')}):")
+        lines.append(f"Hook (first 3-5s): {gemini_timeline.get('hook', 'N/A')}")
+
+        scenes = gemini_timeline.get('scenes', [])
+        if scenes:
+            lines.append("\nScenes:")
+            for i, scene in enumerate(scenes, 1):
+                lines.append(f"  {i}. [{scene.get('start_seconds', 0):.1f}s - {scene.get('end_seconds', 0):.1f}s] {scene.get('description', '')}")
+                elems = scene.get('visual_elements', [])
+                if elems:
+                    lines.append(f"     Elements: {', '.join(elems)}")
+
+        on_screen = gemini_timeline.get('on_screen_text', [])
+        if on_screen:
+            lines.append("\nOn-screen text:")
+            for t in on_screen:
+                lines.append(f"  [{t.get('timestamp_seconds', 0):.1f}s] \"{t.get('text', '')}\"")
+
+        transcript = gemini_timeline.get('transcript', '')
+        if transcript:
+            lines.append(f"\nTranscript: {transcript[:500]}")
+
+        brand_t = gemini_timeline.get('brand_first_appearance')
+        if brand_t is not None:
+            lines.append(f"Brand first appears: {brand_t:.1f}s")
+
+        cta_t = gemini_timeline.get('cta_first_appearance')
+        if cta_t is not None:
+            lines.append(f"CTA first appears: {cta_t:.1f}s")
+
+        lines.append("\nAs a viewer, at what second would you stop watching (if at all)? What moment stands out to you most?")
+
+    lines.append("\nHow would YOU as this persona react to this ad? Provide your response in JSON format.")
+    return "\n".join(lines)
 
 
 async def _analyze_single_persona(
@@ -135,10 +201,12 @@ async def _analyze_single_persona(
     ad_prompt: str,
     semaphore: asyncio.Semaphore,
     index: int,
+    is_video: bool = False,
 ) -> tuple[int, str, Dict[str, Any]]:
     """Analyze ad from a single persona's perspective. Returns (index, persona_id, result)."""
     persona_id = str(persona['id'])
-    system_prompt = _build_persona_prompt(persona)
+    system_prompt = _build_persona_prompt(persona, is_video=is_video)
+    schema = _VIDEO_REACTION_SCHEMA if is_video else _REACTION_SCHEMA
 
     async with semaphore:
         try:
@@ -146,7 +214,7 @@ async def _analyze_single_persona(
                 provider.generate_json(
                     system_prompt=system_prompt,
                     user_prompt=ad_prompt,
-                    schema=_REACTION_SCHEMA,
+                    schema=schema,
                     temperature=0.7,
                     max_tokens=200,
                 ),
@@ -155,21 +223,32 @@ async def _analyze_single_persona(
 
             attention = analysis.get('attention', 'partial')
             insight = analysis.get('insight', 'No specific feedback provided.')
+            skip_at = analysis.get('skip_at_seconds')
+            moment = analysis.get('moment')
 
         except asyncio.TimeoutError:
             print(f"Timeout for persona {persona_id}")
             attention = "partial"
             insight = "Analysis timed out."
+            skip_at = None
+            moment = None
         except Exception as e:
             print(f"Error analyzing with persona {persona_id}: {e}")
             attention = "partial"
             insight = "Analysis unavailable due to API error."
+            skip_at = None
+            moment = None
 
-    return (index, persona_id, {
+    result: Dict[str, Any] = {
         "insight": insight,
         "attention": attention,
         "persona_name": persona.get('name', 'Unknown'),
-    })
+    }
+    if is_video:
+        result["skip_at_seconds"] = skip_at
+        result["moment"] = moment
+
+    return (index, persona_id, result)
 
 
 @router.post("/analyze-ad-smart", response_model=AdAnalysisResponse)
@@ -205,11 +284,12 @@ async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
         provider = get_provider()
         semaphore = asyncio.Semaphore(ADVISOR_CONCURRENCY)
         ad_prompt = _build_ad_prompt(request.feature_vector)
+        is_video = request.feature_vector.get('gemini_timeline') is not None
 
         t0 = time.monotonic()
 
         tasks = [
-            _analyze_single_persona(provider, persona, ad_prompt, semaphore, idx)
+            _analyze_single_persona(provider, persona, ad_prompt, semaphore, idx, is_video=is_video)
             for idx, persona in enumerate(selected_personas)
         ]
         results = await asyncio.gather(*tasks)

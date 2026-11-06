@@ -1,0 +1,47 @@
+{
+  "scenes": [
+    {
+      "start_seconds": 0.0,
+      "end_seconds": 3.5,
+      "description": "A close-up of a runner tying their shoes on a city sidewalk at dawn",
+      "visual_elements": ["running shoes", "sidewalk", "dawn light", "hands"]
+    },
+    {
+      "start_seconds": 3.5,
+      "end_seconds": 8.0,
+      "description": "Wide shot of the runner sprinting through an empty urban street",
+      "visual_elements": ["runner", "urban street", "buildings", "motion blur"]
+    },
+    {
+      "start_seconds": 8.0,
+      "end_seconds": 15.0,
+      "description": "Montage of the runner passing landmarks with upbeat music",
+      "visual_elements": ["bridge", "park", "sunrise", "sweat"]
+    },
+    {
+      "start_seconds": 15.0,
+      "end_seconds": 22.0,
+      "description": "The runner stops at a hilltop overlooking the city, product reveal",
+      "visual_elements": ["hilltop", "city panorama", "product bottle", "logo"]
+    },
+    {
+      "start_seconds": 22.0,
+      "end_seconds": 28.0,
+      "description": "Brand tagline and CTA appear with energetic music crescendo",
+      "visual_elements": ["tagline text", "website URL", "logo", "gradient background"]
+    }
+  ],
+  "hook": "Opens with an intimate close-up of running shoes being laced up, creating curiosity about the runner's journey ahead",
+  "on_screen_text": [
+    {"text": "PUSH YOUR LIMITS", "timestamp_seconds": 10.0},
+    {"text": "FuelMax Energy Drink", "timestamp_seconds": 16.5},
+    {"text": "Available everywhere", "timestamp_seconds": 23.0},
+    {"text": "fuelmax.com", "timestamp_seconds": 25.0}
+  ],
+  "transcript": "Every morning starts with a choice. You can stay comfortable, or you can push beyond what you thought possible. FuelMax gives you the energy to go further. Push your limits.",
+  "brand_first_appearance": 16.5,
+  "cta_first_appearance": 23.0,
+  "pacing": "fast",
+  "aspect_ratio": "landscape",
+  "duration_seconds": 28.0
+}

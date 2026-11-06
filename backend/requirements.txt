@@ -14,6 +14,7 @@ pytesseract==0.3.13
 openai==1.55.3
 google-genai>=1.0
 moondream==0.0.6
+google-genai>=1.0.0
 
 # Database
 supabase==2.22.2
