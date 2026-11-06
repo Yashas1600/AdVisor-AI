@@ -57,6 +57,10 @@ sys.modules["utils.openai_client"] = mock_openai_client_mod
 # Mock fetchai client
 sys.modules["utils.fetchai_client"] = MagicMock()
 
+# Mock google.cloud.bigquery (not installed locally)
+sys.modules["google.cloud"] = MagicMock()
+sys.modules["google.cloud.bigquery"] = MagicMock()
+
 # Mock google packages (not installed locally)
 sys.modules["google"] = MagicMock()
 sys.modules["google.genai"] = MagicMock()

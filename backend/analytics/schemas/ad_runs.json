@@ -1,0 +1,12 @@
+[
+  {"name": "run_id", "type": "STRING", "mode": "REQUIRED", "description": "Unique identifier for the analysis run"},
+  {"name": "timestamp", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When the analysis was initiated"},
+  {"name": "ad_type", "type": "STRING", "mode": "REQUIRED", "description": "Type of ad creative: image or video"},
+  {"name": "provider", "type": "STRING", "mode": "REQUIRED", "description": "LLM provider used for analysis (e.g. openai, fetchai)"},
+  {"name": "orchestrator", "type": "STRING", "mode": "REQUIRED", "description": "Orchestrator method (e.g. smart_selector, manual)"},
+  {"name": "persona_count", "type": "INTEGER", "mode": "REQUIRED", "description": "Number of personas that participated in this run"},
+  {"name": "latency_s", "type": "FLOAT", "mode": "REQUIRED", "description": "Total wall-clock time in seconds for the analysis run"},
+  {"name": "tokens", "type": "INTEGER", "mode": "NULLABLE", "description": "Total tokens consumed across all persona calls"},
+  {"name": "cost_usd", "type": "FLOAT", "mode": "NULLABLE", "description": "Estimated cost in USD for this run"},
+  {"name": "status", "type": "STRING", "mode": "REQUIRED", "description": "Run status: completed, partial, or failed"}
+]

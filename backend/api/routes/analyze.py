@@ -21,6 +21,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from api.smart_agent_selector import smart_selector
 from db.supabase_client import supabase_client
 from llm import get_provider
+from analytics.sink import generate_run_id, alog_ad_run, alog_persona_responses, alog_ad_features
 
 router = APIRouter(prefix="/api", tags=["Ad Analysis"])
 
@@ -290,6 +291,25 @@ async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
             "selected": list(analysis_results.keys()),
         }
         saved_ad_id = _save_to_supabase(request, agent_results)
+
+        # Analytics (fire-and-forget, never blocks)
+        run_id = generate_run_id()
+        is_video = request.feature_vector.get("gemini_timeline") is not None
+        asyncio.ensure_future(alog_ad_run(
+            run_id=run_id,
+            ad_type="video" if is_video else "image",
+            provider=os.getenv("LLM_PROVIDER", "gemini"),
+            orchestrator=_ORCHESTRATOR,
+            persona_count=summary.get("total_personas", 0),
+            latency_s=summary.get("latency_seconds", 0),
+            status="completed",
+        ))
+        persona_rows = [
+            {"persona_id": pid, **res}
+            for pid, res in analysis_results.items()
+        ]
+        asyncio.ensure_future(alog_persona_responses(run_id=run_id, responses=persona_rows))
+        asyncio.ensure_future(alog_ad_features(run_id=run_id, extracted_features=request.feature_vector))
 
         return AdAnalysisResponse(
             ad_id=saved_ad_id,

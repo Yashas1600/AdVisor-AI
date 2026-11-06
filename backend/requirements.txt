@@ -31,5 +31,8 @@ dateparser==1.2.0
 # Reddit scraping
 beautifulsoup4==4.13.4
 
+# Analytics
+google-cloud-bigquery>=3.0
+
 # Numpy - install last to satisfy all dependencies
 numpy>=2.1.2
