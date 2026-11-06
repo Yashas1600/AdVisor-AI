@@ -28,7 +28,7 @@ SupaVisor is a cloud-hosted coordinator agent on Fetch.ai's Agentverse that brid
 SupaVisor orchestrates 932 AI persona agents for ad creative analysis. Aggregates authentic feedback from data-driven personas (sourced from 1,577 Reddit communities), extracts sentiment metrics, and delivers insights for marketing teams. Powered by Fetch.ai ASI:One API.
 
 ## Elevator Pitch (30 seconds)
-SupaVisor is like having 932 real people review your ad—instantly. It's a coordinator agent that manages hundreds of AI personas, each representing authentic Reddit community perspectives. Submit your ad description, get sentiment analysis and insights from diverse audiences in seconds. Perfect for marketers who need authentic feedback at scale.
+SupaVisor is like having 932 real people review your ad--instantly. It's a coordinator agent that manages hundreds of AI personas, each representing authentic Reddit community perspectives. Submit your ad description, get sentiment analysis and insights from diverse audiences in seconds. Perfect for marketers who need authentic feedback at scale.
 
 ## One-Liner
 Intelligent coordinator orchestrating 932 data-driven AI personas to deliver authentic ad creative feedback in seconds.
