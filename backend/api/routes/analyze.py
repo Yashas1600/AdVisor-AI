@@ -1,6 +1,6 @@
 """
 Ad Analysis Orchestration Endpoint
-Selects relevant personas, uses OpenAI agents for analysis, saves results to Supabase
+Selects relevant personas, uses the configured LLM provider for analysis, saves results to Supabase
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from api.smart_agent_selector import smart_selector
 from db.supabase_client import supabase_client
-from openai import AsyncOpenAI
+from llm import get_provider
 
 router = APIRouter(prefix="/api", tags=["Ad Analysis"])
 
@@ -56,6 +56,20 @@ class AdAnalysisResponse(BaseModel):
     summary: Dict[str, Any]
 
 
+# JSON schema for persona ad reaction
+_REACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "attention": {
+            "type": "string",
+            "enum": ["full", "partial", "ignore"],
+        },
+        "insight": {"type": "string"},
+    },
+    "required": ["attention", "insight"],
+}
+
+
 def _build_persona_prompt(persona: Dict[str, Any]) -> str:
     """Build system prompt for a persona."""
     demographics = persona.get('demographics', {})
@@ -83,11 +97,7 @@ Pain Points: {', '.join(pain_points) if pain_points else 'None'}
 Motivations: {', '.join(motivations) if motivations else 'None'}
 
 You are reviewing an advertisement. Respond authentically from this persona's perspective.
-Your response must be in this exact JSON format:
-{{
-  "attention": "full" | "partial" | "ignore",
-  "insight": "A single sentence explaining your reaction as this persona"
-}}
+Your response must be valid JSON with keys "attention" and "insight".
 
 Attention levels:
 - "full": This ad is highly relevant and compelling to you
@@ -120,7 +130,7 @@ How would YOU as this persona react to this ad? Provide your response in JSON fo
 
 
 async def _analyze_single_persona(
-    client: AsyncOpenAI,
+    provider,
     persona: Dict[str, Any],
     ad_prompt: str,
     semaphore: asyncio.Semaphore,
@@ -132,41 +142,26 @@ async def _analyze_single_persona(
 
     async with semaphore:
         try:
-            response = await asyncio.wait_for(
-                client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": ad_prompt},
-                    ],
+            analysis = await asyncio.wait_for(
+                provider.generate_json(
+                    system_prompt=system_prompt,
+                    user_prompt=ad_prompt,
+                    schema=_REACTION_SCHEMA,
                     temperature=0.7,
                     max_tokens=200,
-                    response_format={"type": "json_object"},
                 ),
                 timeout=PERSONA_TIMEOUT,
             )
 
-            response_text = response.choices[0].message.content
-            json_start = response_text.find('{')
-            json_end = response_text.rfind('}') + 1
-            if json_start >= 0 and json_end > json_start:
-                analysis = json.loads(response_text[json_start:json_end])
-                attention = analysis.get('attention', 'partial')
-                insight = analysis.get('insight', 'No specific feedback provided.')
-            else:
-                attention = _extract_attention_level(response_text)
-                insight = response_text[:200]
+            attention = analysis.get('attention', 'partial')
+            insight = analysis.get('insight', 'No specific feedback provided.')
 
         except asyncio.TimeoutError:
             print(f"Timeout for persona {persona_id}")
             attention = "partial"
             insight = "Analysis timed out."
         except Exception as e:
-            error_msg = str(e)
-            if "400" in error_msg or "Bad Request" in error_msg:
-                print(f"API Error for persona {persona_id}: {error_msg[:100]}")
-            else:
-                print(f"Error analyzing with persona {persona_id}: {e}")
+            print(f"Error analyzing with persona {persona_id}: {e}")
             attention = "partial"
             insight = "Analysis unavailable due to API error."
 
@@ -182,7 +177,7 @@ async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
     """
     Intelligently analyze an ad using:
     1. Smart persona selection (age + 40% industry match)
-    2. OpenAI GPT-4o-mini to analyze feature vectors from each persona's perspective
+    2. LLM provider to analyze feature vectors from each persona's perspective
     3. Aggregate results and save to Supabase
 
     Returns:
@@ -206,15 +201,15 @@ async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
 
         print(f"Selected {len(selected_personas)} personas")
 
-        # Step 2: Run concurrent analysis
-        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Step 2: Run concurrent analysis via provider
+        provider = get_provider()
         semaphore = asyncio.Semaphore(ADVISOR_CONCURRENCY)
         ad_prompt = _build_ad_prompt(request.feature_vector)
 
         t0 = time.monotonic()
 
         tasks = [
-            _analyze_single_persona(client, persona, ad_prompt, semaphore, idx)
+            _analyze_single_persona(provider, persona, ad_prompt, semaphore, idx)
             for idx, persona in enumerate(selected_personas)
         ]
         results = await asyncio.gather(*tasks)

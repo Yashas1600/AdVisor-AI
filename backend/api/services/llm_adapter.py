@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import time
@@ -112,9 +113,36 @@ def complete_structured(
         dbg["latency_ms"] = int((time.time() - start) * 1000)
         return data, dbg
 
-    # Stubs for other providers
-    if provider in {"google", "anthropic"}:
-        raise NotImplementedError(f"Provider '{provider}' not implemented in this build.")
+    if provider == "google":
+        from llm import get_provider as _get_provider
+
+        gemini = _get_provider("gemini")
+
+        try:
+            from api.schemas_brandmeta import BrandMeta
+            brand_schema = BrandMeta.model_json_schema()
+        except Exception as exc:
+            raise RuntimeError("Failed to build JSON schema from BrandMeta") from exc
+
+        result = asyncio.run(
+            gemini.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=brand_schema,
+                temperature=temperature,
+            )
+        )
+
+        # Wrap in brand_meta if needed
+        if result and "brand_meta" not in result and isinstance(result, dict):
+            result = {"brand_meta": result}
+
+        dbg: Dict[str, Any] = {"provider": provider, "mode": "gemini.generate_json"}
+        dbg["latency_ms"] = int((time.time() - start) * 1000)
+        return result, dbg
+
+    if provider == "anthropic":
+        raise NotImplementedError(f"Provider 'anthropic' not implemented in this build.")
 
     raise ValueError(f"Unknown provider: {provider}")
 
@@ -230,8 +258,27 @@ def complete_structured_generic(
         dbg["latency_ms"] = int((time.time() - start) * 1000)
         return data, dbg
 
-    if provider in {"google", "anthropic"}:
-        raise NotImplementedError(f"Provider '{provider}' not implemented in this build.")
+    if provider == "google":
+        from llm import get_provider as _get_provider
+
+        gemini = _get_provider("gemini")
+
+        result = asyncio.run(
+            gemini.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=json_schema,
+                temperature=temperature,
+                max_tokens=max_tokens or 1000,
+            )
+        )
+
+        dbg: Dict[str, Any] = {"provider": provider, "mode": "gemini.generate_json"}
+        dbg["latency_ms"] = int((time.time() - start) * 1000)
+        return result, dbg
+
+    if provider == "anthropic":
+        raise NotImplementedError(f"Provider 'anthropic' not implemented in this build.")
 
     raise ValueError(f"Unknown provider: {provider}")
 

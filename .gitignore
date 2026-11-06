@@ -70,3 +70,6 @@ data/analytics/
 
 # Eval results (keep latest.md)
 eval/results/*.json
+
+# Claude worktrees
+.claude/worktrees/
