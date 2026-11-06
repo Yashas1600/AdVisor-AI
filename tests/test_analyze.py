@@ -1,26 +1,23 @@
 """Tests for the /api/analyze-ad-smart endpoint contract."""
 import asyncio
 import json
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # conftest.py already mocked heavy deps and added backend to sys.path
+
+# Force legacy orchestrator for these tests (avoids ADK import)
+os.environ["ORCHESTRATOR"] = "legacy"
+
 from api.routes.analyze import router, _extract_attention_level
+from llm.mock import MockProvider
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
 # ---- helpers ----
-
-def _mock_openai_response(attention="full", insight="Great ad!"):
-    content = json.dumps({"attention": attention, "insight": insight})
-    choice = MagicMock()
-    choice.message.content = content
-    resp = MagicMock()
-    resp.choices = [choice]
-    return resp
-
 
 def _make_request_body(feature_vector, num_personas=5):
     return {
@@ -31,8 +28,8 @@ def _make_request_body(feature_vector, num_personas=5):
     }
 
 
-def _build_client(personas, openai_side_effect=None):
-    """Build a TestClient with mocked smart_selector and AsyncOpenAI."""
+def _build_client(personas, mock_provider=None):
+    """Build a TestClient with mocked smart_selector and provider."""
     mock_supabase = MagicMock()
     mock_supabase.from_.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"id": "test-id"}])
     mock_supabase.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"id": "test-id"}])
@@ -41,20 +38,15 @@ def _build_client(personas, openai_side_effect=None):
     mock_selector = MagicMock()
     mock_selector.select_relevant_personas.return_value = personas
 
-    mock_async_client = AsyncMock()
-    if openai_side_effect:
-        mock_async_client.chat.completions.create = openai_side_effect
-    else:
-        mock_async_client.chat.completions.create = AsyncMock(
-            return_value=_mock_openai_response("full", "This ad speaks to me!")
-        )
+    if mock_provider is None:
+        mock_provider = MockProvider(default_attention="full", default_insight="This ad speaks to me!")
 
     app = FastAPI()
     app.include_router(router)
 
     with patch("api.routes.analyze.smart_selector", mock_selector), \
          patch("api.routes.analyze.supabase_client", mock_supabase), \
-         patch("api.routes.analyze.AsyncOpenAI", return_value=mock_async_client):
+         patch("api.routes.analyze.get_provider", return_value=mock_provider):
         yield TestClient(app)
 
 
@@ -138,12 +130,13 @@ class TestConcurrency:
         """A timed-out persona should get attention=partial."""
         personas = sample_personas[:2]
 
-        async def slow_create(**kwargs):
-            await asyncio.sleep(100)
-            return _mock_openai_response()
+        class SlowProvider(MockProvider):
+            async def generate_json(self, **kwargs):
+                await asyncio.sleep(100)
+                return {"attention": "full", "insight": "never reached"}
 
         with patch("api.routes.analyze.PERSONA_TIMEOUT", 0.1):
-            for client in _build_client(personas, openai_side_effect=slow_create):
+            for client in _build_client(personas, mock_provider=SlowProvider()):
                 body = _make_request_body(sample_feature_vector, num_personas=2)
                 resp = client.post("/api/analyze-ad-smart", json=body)
                 data = resp.json()

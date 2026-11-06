@@ -1,6 +1,10 @@
 """
 Ad Analysis Orchestration Endpoint
-Selects relevant personas, uses the configured LLM provider for analysis, saves results to Supabase
+Selects relevant personas, uses the configured LLM provider for analysis, saves results to Supabase.
+
+Supports two orchestration modes controlled by the ORCHESTRATOR env var:
+  - "adk"    (default) -- Google ADK coordinator with parallel fan-out
+  - "legacy" -- concurrent asyncio.gather flow with configurable provider
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -22,6 +26,7 @@ router = APIRouter(prefix="/api", tags=["Ad Analysis"])
 
 ADVISOR_CONCURRENCY = int(os.getenv("ADVISOR_CONCURRENCY", "25"))
 PERSONA_TIMEOUT = int(os.getenv("PERSONA_TIMEOUT", "30"))
+_ORCHESTRATOR = os.getenv("ORCHESTRATOR", "adk").lower()
 
 
 # Request/Response Models
@@ -141,7 +146,6 @@ def _build_ad_prompt(feature_vector: Dict[str, Any]) -> str:
     features = feature_vector.get('features', {})
     gemini_timeline = feature_vector.get('gemini_timeline')
 
-    # Use gemini data if available, fallback to moondream
     creative_data = gemini if gemini else moondream
 
     lines = ["Analyze this advertisement:\n"]
@@ -251,6 +255,10 @@ async def _analyze_single_persona(
     return (index, persona_id, result)
 
 
+# -----------------------------------------------------------------------
+# Main endpoint
+# -----------------------------------------------------------------------
+
 @router.post("/analyze-ad-smart", response_model=AdAnalysisResponse)
 async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
     """
@@ -259,139 +267,35 @@ async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
     2. LLM provider to analyze feature vectors from each persona's perspective
     3. Aggregate results and save to Supabase
 
+    Orchestration mode is controlled by the ORCHESTRATOR env var:
+    - "adk" (default): Google ADK coordinator with parallel fan-out
+    - "legacy": concurrent asyncio.gather flow
+
     Returns:
         Analysis results with persona insights and attention levels
     """
     try:
-        # Step 1: Select relevant personas
-        print(f"Selecting {request.num_personas} personas...")
-        selected_personas = smart_selector.select_relevant_personas(
-            target_age_range=request.target_age_range,
-            industry_keywords=request.industry_keywords,
-            num_personas=request.num_personas,
-            industry_match_ratio=0.4
-        )
+        if _ORCHESTRATOR == "adk":
+            result = await _run_adk_path(request)
+        else:
+            result = await _run_legacy_path(request)
 
-        if not selected_personas:
-            raise HTTPException(
-                status_code=404,
-                detail="No personas found matching criteria"
-            )
+        selected_personas = result["selected_personas"]
+        analysis_results = result["analysis_results"]
+        summary = result["summary"]
 
-        print(f"Selected {len(selected_personas)} personas")
-
-        # Step 2: Run concurrent analysis via provider
-        provider = get_provider()
-        semaphore = asyncio.Semaphore(ADVISOR_CONCURRENCY)
-        ad_prompt = _build_ad_prompt(request.feature_vector)
-        is_video = request.feature_vector.get('gemini_timeline') is not None
-
-        t0 = time.monotonic()
-
-        tasks = [
-            _analyze_single_persona(provider, persona, ad_prompt, semaphore, idx, is_video=is_video)
-            for idx, persona in enumerate(selected_personas)
-        ]
-        results = await asyncio.gather(*tasks)
-
-        elapsed = time.monotonic() - t0
-        print(f"Completed {len(results)} persona analyses in {elapsed:.1f}s (concurrency={ADVISOR_CONCURRENCY})")
-
-        # Build results dict in stable order
-        results_sorted = sorted(results, key=lambda r: r[0])
-        analysis_results = {}
-        attention_counts = {"full": 0, "partial": 0, "ignore": 0}
-        for _idx, persona_id, result in results_sorted:
-            analysis_results[persona_id] = result
-            attention_counts[result["attention"]] += 1
-
-        # Step 3: Create summary
-        total = len(analysis_results)
-        summary = {
-            "total_personas": total,
-            "attention": {
-                "full": attention_counts["full"],
-                "partial": attention_counts["partial"],
-                "ignore": attention_counts["ignore"]
-            },
-            "attention_percentages": {
-                "full": round((attention_counts["full"] / total) * 100, 1) if total > 0 else 0,
-                "partial": round((attention_counts["partial"] / total) * 100, 1) if total > 0 else 0,
-                "ignore": round((attention_counts["ignore"] / total) * 100, 1) if total > 0 else 0
-            },
-            "latency_seconds": round(elapsed, 2),
-        }
-
-        # Step 4: Save to Supabase ad_analyses table
+        # Supabase persistence (shared by both paths)
         agent_results = {
             "byId": analysis_results,
-            "selected": list(analysis_results.keys())
+            "selected": list(analysis_results.keys()),
         }
+        saved_ad_id = _save_to_supabase(request, agent_results)
 
-        saved_ad_id = request.ad_id
-
-        if request.ad_id:
-            print(f"Updating existing ad_analyses record: {request.ad_id}")
-            try:
-                check_response = supabase_client.from_("ad_analyses").select("id").eq("id", request.ad_id).execute()
-
-                if not check_response.data or len(check_response.data) == 0:
-                    print(f"Record {request.ad_id} does not exist. Creating instead...")
-                    insert_data = {
-                        "id": request.ad_id,
-                        "title": request.ad_name or "Untitled Ad",
-                        "input": {"brand": request.brand_name or "Unknown", "desc": ""},
-                        "output": {"panelData": None},
-                        "feature_output": request.feature_vector,
-                        "agent_results": agent_results,
-                    }
-                    insert_response = supabase_client.from_("ad_analyses").insert(insert_data).execute()
-                    if insert_response.data:
-                        print(f"Created new record with id: {request.ad_id}")
-                    else:
-                        print(f"Failed to create record: {insert_response}")
-                else:
-                    update_response = supabase_client.from_("ad_analyses").update({
-                        "agent_results": agent_results
-                    }).eq("id", request.ad_id).execute()
-
-                    if not update_response.data:
-                        print(f"Update failed: {update_response}")
-                    else:
-                        print(f"Updated agent_results for ad_id: {request.ad_id}")
-            except Exception as e:
-                print(f"Error with Supabase: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            print("Creating new ad_analyses record with agent_results")
-            try:
-                insert_data = {
-                    "ad_name": request.ad_name or "Untitled Ad",
-                    "brand_name": request.brand_name or "Unknown Brand",
-                    "image_url": request.image_url,
-                    "user_id": request.user_id,
-                    "features": request.feature_vector,
-                    "agent_results": agent_results,
-                    "status": "completed"
-                }
-
-                insert_response = supabase_client.from_("ad_analyses").insert(insert_data).execute()
-
-                if insert_response.data and len(insert_response.data) > 0:
-                    saved_ad_id = insert_response.data[0].get('id')
-                    print(f"Created ad_analyses record with id: {saved_ad_id}")
-                else:
-                    print("Warning: Could not create ad_analyses record")
-            except Exception as e:
-                print(f"Error creating Supabase record: {e}")
-
-        # Step 5: Return response
         return AdAnalysisResponse(
             ad_id=saved_ad_id,
             selected_personas=selected_personas,
             analysis_results=analysis_results,
-            summary=summary
+            summary=summary,
         )
 
     except HTTPException:
@@ -400,13 +304,148 @@ async def analyze_ad_with_smart_selection(request: AdAnalysisRequest):
         print(f"Error in analyze_ad_with_smart_selection: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error analyzing ad: {str(e)}"
+            detail=f"Error analyzing ad: {str(e)}",
         )
+
+
+# -----------------------------------------------------------------------
+# ADK orchestration path
+# -----------------------------------------------------------------------
+
+async def _run_adk_path(request: AdAnalysisRequest) -> Dict[str, Any]:
+    """Delegate to the ADK coordinator (parallel fan-out)."""
+    from orchestration.adk.coordinator import run_adk_analysis
+
+    print(f"[ORCHESTRATOR=adk] Starting analysis for {request.num_personas} personas")
+    result = await run_adk_analysis(
+        feature_vector=request.feature_vector,
+        target_age_range=request.target_age_range,
+        industry_keywords=request.industry_keywords,
+        num_personas=request.num_personas,
+    )
+
+    if not result.get("selected_personas"):
+        raise HTTPException(status_code=404, detail="No personas found matching criteria")
+
+    return result
+
+
+# -----------------------------------------------------------------------
+# Legacy orchestration path (concurrent asyncio.gather)
+# -----------------------------------------------------------------------
+
+async def _run_legacy_path(request: AdAnalysisRequest) -> Dict[str, Any]:
+    """Concurrent persona analysis via provider abstraction."""
+    print(f"[ORCHESTRATOR=legacy] Selecting {request.num_personas} personas...")
+    selected_personas = smart_selector.select_relevant_personas(
+        target_age_range=request.target_age_range,
+        industry_keywords=request.industry_keywords,
+        num_personas=request.num_personas,
+        industry_match_ratio=0.4,
+    )
+
+    if not selected_personas:
+        raise HTTPException(status_code=404, detail="No personas found matching criteria")
+
+    print(f"[legacy] Selected {len(selected_personas)} personas")
+
+    provider = get_provider()
+    semaphore = asyncio.Semaphore(ADVISOR_CONCURRENCY)
+    ad_prompt = _build_ad_prompt(request.feature_vector)
+    is_video = request.feature_vector.get('gemini_timeline') is not None
+
+    t0 = time.monotonic()
+
+    tasks = [
+        _analyze_single_persona(provider, persona, ad_prompt, semaphore, idx, is_video=is_video)
+        for idx, persona in enumerate(selected_personas)
+    ]
+    results = await asyncio.gather(*tasks)
+
+    elapsed = time.monotonic() - t0
+    print(f"[legacy] Completed {len(results)} persona analyses in {elapsed:.1f}s (concurrency={ADVISOR_CONCURRENCY})")
+
+    results_sorted = sorted(results, key=lambda r: r[0])
+    analysis_results = {}
+    attention_counts = {"full": 0, "partial": 0, "ignore": 0}
+    for _idx, persona_id, result in results_sorted:
+        analysis_results[persona_id] = result
+        attention_counts[result["attention"]] += 1
+
+    total = len(analysis_results)
+    summary = {
+        "total_personas": total,
+        "attention": {
+            "full": attention_counts["full"],
+            "partial": attention_counts["partial"],
+            "ignore": attention_counts["ignore"],
+        },
+        "attention_percentages": {
+            "full": round((attention_counts["full"] / total) * 100, 1) if total > 0 else 0,
+            "partial": round((attention_counts["partial"] / total) * 100, 1) if total > 0 else 0,
+            "ignore": round((attention_counts["ignore"] / total) * 100, 1) if total > 0 else 0,
+        },
+        "latency_seconds": round(elapsed, 2),
+    }
+
+    return {
+        "selected_personas": selected_personas,
+        "analysis_results": analysis_results,
+        "summary": summary,
+    }
+
+
+# -----------------------------------------------------------------------
+# Supabase persistence (shared)
+# -----------------------------------------------------------------------
+
+def _save_to_supabase(request: AdAnalysisRequest, agent_results: Dict[str, Any]) -> str:
+    """Save analysis results to Supabase. Returns the ad_id."""
+    saved_ad_id = request.ad_id
+
+    if request.ad_id:
+        try:
+            check_response = supabase_client.from_("ad_analyses").select("id").eq("id", request.ad_id).execute()
+
+            if not check_response.data or len(check_response.data) == 0:
+                insert_data = {
+                    "id": request.ad_id,
+                    "title": request.ad_name or "Untitled Ad",
+                    "input": {"brand": request.brand_name or "Unknown", "desc": ""},
+                    "output": {"panelData": None},
+                    "feature_output": request.feature_vector,
+                    "agent_results": agent_results,
+                }
+                supabase_client.from_("ad_analyses").insert(insert_data).execute()
+            else:
+                supabase_client.from_("ad_analyses").update({
+                    "agent_results": agent_results
+                }).eq("id", request.ad_id).execute()
+        except Exception as e:
+            print(f"Error with Supabase: {type(e).__name__}: {e}")
+    else:
+        try:
+            insert_data = {
+                "ad_name": request.ad_name or "Untitled Ad",
+                "brand_name": request.brand_name or "Unknown Brand",
+                "image_url": request.image_url,
+                "user_id": request.user_id,
+                "features": request.feature_vector,
+                "agent_results": agent_results,
+                "status": "completed",
+            }
+            insert_response = supabase_client.from_("ad_analyses").insert(insert_data).execute()
+            if insert_response.data and len(insert_response.data) > 0:
+                saved_ad_id = insert_response.data[0].get("id")
+        except Exception as e:
+            print(f"Error creating Supabase record: {e}")
+
+    return saved_ad_id
 
 
 def _extract_attention_level(analysis_text: str) -> str:
     """
-    Extract attention level from analysis text using heuristics
+    Extract attention level from analysis text using heuristics.
 
     Returns: "full", "partial", or "ignore"
     """

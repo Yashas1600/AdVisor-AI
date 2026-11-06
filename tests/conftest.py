@@ -57,6 +57,15 @@ sys.modules["utils.openai_client"] = mock_openai_client_mod
 # Mock fetchai client
 sys.modules["utils.fetchai_client"] = MagicMock()
 
+# Mock google packages (not installed locally)
+sys.modules["google"] = MagicMock()
+sys.modules["google.genai"] = MagicMock()
+sys.modules["google.genai.types"] = MagicMock()
+sys.modules["google.adk"] = MagicMock()
+sys.modules["google.adk.agents"] = MagicMock()
+sys.modules["google.adk.events"] = MagicMock()
+sys.modules["google.adk.runners"] = MagicMock()
+
 
 @pytest.fixture
 def mock_env(monkeypatch):

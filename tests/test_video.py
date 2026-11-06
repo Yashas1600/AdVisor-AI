@@ -134,20 +134,22 @@ class TestPersonaPromptVideoIntegration:
 
     def test_build_ad_prompt_with_timeline(self):
         from api.routes.analyze import _build_ad_prompt
-        creative = {
-            "summary": "FuelMax energy drink ad",
-            "caption": "Runner in the city",
-            "cta": "Order now",
-            "keywords": ["fitness", "energy"],
-            "target_audience": "18-35 males",
+        feature_vector = {
+            "moondream": {
+                "summary": "FuelMax energy drink ad",
+                "caption": "Runner in the city",
+                "cta": "Order now",
+                "keywords": ["fitness", "energy"],
+                "target_audience": "18-35 males",
+            },
+            "features": {
+                "color": {"palette_hex": ["#FF0000", "#00FF00"], "colorfulness": 45.2},
+                "layout": {"aspect_ratio": 1.78, "whitespace_ratio": 0.15},
+            },
+            "gemini_timeline": self.timeline,
         }
-        features = {
-            "color": {"palette_hex": ["#FF0000", "#00FF00"], "colorfulness": 45.2},
-            "layout": {"aspect_ratio": 1.78, "whitespace_ratio": 0.15},
-        }
-        prompt = _build_ad_prompt(creative, features, self.timeline)
+        prompt = _build_ad_prompt(feature_vector)
 
-        # Timeline info should be in prompt
         assert "VIDEO TIMELINE" in prompt
         assert "28.0s" in prompt
         assert "fast" in prompt
@@ -157,17 +159,22 @@ class TestPersonaPromptVideoIntegration:
 
     def test_build_ad_prompt_without_timeline(self):
         from api.routes.analyze import _build_ad_prompt
-        creative = {"summary": "An image ad", "caption": "", "cta": "", "keywords": [], "target_audience": ""}
-        features = {"color": {"palette_hex": [], "colorfulness": 0}, "layout": {"aspect_ratio": 1.0, "whitespace_ratio": 0}}
-        prompt = _build_ad_prompt(creative, features, None)
+        feature_vector = {
+            "moondream": {"summary": "An image ad", "caption": "", "cta": "", "keywords": [], "target_audience": ""},
+            "features": {"color": {"palette_hex": [], "colorfulness": 0}, "layout": {"aspect_ratio": 1.0, "whitespace_ratio": 0}},
+        }
+        prompt = _build_ad_prompt(feature_vector)
         assert "VIDEO TIMELINE" not in prompt
         assert "skip" not in prompt.lower()
 
     def test_prompt_includes_scene_descriptions(self):
         from api.routes.analyze import _build_ad_prompt
-        creative = {"summary": "test", "caption": "", "cta": "", "keywords": [], "target_audience": ""}
-        features = {"color": {"palette_hex": [], "colorfulness": 0}, "layout": {"aspect_ratio": 1.0, "whitespace_ratio": 0}}
-        prompt = _build_ad_prompt(creative, features, self.timeline)
+        feature_vector = {
+            "moondream": {"summary": "test", "caption": "", "cta": "", "keywords": [], "target_audience": ""},
+            "features": {"color": {"palette_hex": [], "colorfulness": 0}, "layout": {"aspect_ratio": 1.0, "whitespace_ratio": 0}},
+            "gemini_timeline": self.timeline,
+        }
+        prompt = _build_ad_prompt(feature_vector)
         assert "runner" in prompt.lower()
         assert "hilltop" in prompt.lower()
 
