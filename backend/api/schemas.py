@@ -58,11 +58,37 @@ class MoondreamBlock(BaseModel):
     target_audience: str = ""
 
 
+class GeminiTimelineScene(BaseModel):
+    start_seconds: float = 0.0
+    end_seconds: float = 0.0
+    description: str = ""
+    visual_elements: List[str] = Field(default_factory=list)
+
+
+class GeminiTimelineTextOverlay(BaseModel):
+    text: str = ""
+    timestamp_seconds: float = 0.0
+
+
+class GeminiTimeline(BaseModel):
+    scenes: List[GeminiTimelineScene] = Field(default_factory=list)
+    hook: str = ""
+    on_screen_text: List[GeminiTimelineTextOverlay] = Field(default_factory=list)
+    transcript: str = ""
+    brand_first_appearance: Optional[float] = None
+    cta_first_appearance: Optional[float] = None
+    pacing: str = "moderate"
+    aspect_ratio: str = "landscape"
+    duration_seconds: float = 0.0
+
+
 class ExtractResponse(BaseModel):
     ad_id: str
     media: MediaInfo
     features: ExtractFeatures
     version: str = EXTRACTOR_VERSION
     moondream: Optional[MoondreamBlock] = None
+    gemini: Optional[MoondreamBlock] = None
+    gemini_timeline: Optional[GeminiTimeline] = None
 
 

@@ -12,6 +12,8 @@ pytesseract==0.3.13
 
 # AI/ML
 openai==1.55.3
+google-genai>=1.0
+google-adk>=1.0.0
 moondream==0.0.6
 
 # Database
@@ -28,6 +30,9 @@ dateparser==1.2.0
 
 # Reddit scraping
 beautifulsoup4==4.13.4
+
+# Analytics
+google-cloud-bigquery>=3.0
 
 # Numpy - install last to satisfy all dependencies
 numpy>=2.1.2

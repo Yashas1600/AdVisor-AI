@@ -1,0 +1,4 @@
+[
+  {"name": "run_id", "type": "STRING", "mode": "REQUIRED", "description": "Foreign key to ad_runs"},
+  {"name": "extracted_features", "type": "STRING", "mode": "REQUIRED", "description": "JSON string of all extracted features (moondream, color, layout, etc.)"}
+]

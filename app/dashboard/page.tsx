@@ -213,6 +213,24 @@ export default function DashboardPage() {
           (summary.attention_percentages.partial * 0.3)
         );
 
+        // Extract video timeline from feature output if present
+        const videoTimeline = feature_output?.gemini_timeline ?? null;
+
+        // Build persona reactions for video ads
+        let personaReactions: any[] | null = null;
+        if (videoTimeline) {
+          personaReactions = Object.entries(analysisData.analysis_results)
+            .filter(([_, r]: [string, any]) => r.skip_at_seconds != null || r.moment)
+            .map(([_, r]: [string, any]) => ({
+              persona_name: r.persona_name || "Unknown",
+              skip_at_seconds: r.skip_at_seconds ?? null,
+              moment: r.moment ?? null,
+              attention: r.attention,
+              insight: r.insight,
+            }))
+            .slice(0, 20); // Show top 20 reactions
+        }
+
         setPanelData({
           title: "Results",
           impactScore,
@@ -239,6 +257,8 @@ export default function DashboardPage() {
               text: "found it not relevant to their needs"
             },
           ],
+          timeline: videoTimeline,
+          personaReactions,
         });
 
         setAnalysisOpen(true);

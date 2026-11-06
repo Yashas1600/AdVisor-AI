@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from typing import Dict, Literal, Tuple
 
 import os
-from api.schemas import ExtractFeatures, ExtractResponse, MediaInfo, MoondreamBlock
+from api.schemas import ExtractFeatures, ExtractResponse, GeminiTimeline, MediaInfo, MoondreamBlock
 from api.services.moondream_adapter import analyze_image_bytes
 from extractor.pipeline.image_features import extract_from_image
 from extractor.pipeline.preprocess import decode_image_from_bytes, write_temp_video_file
@@ -15,11 +15,55 @@ from extractor.pipeline.video_features import extract_from_video
 logger = logging.getLogger(__name__)
 
 
-def _build_response(ad_id: str, media: Dict, features: Dict, moondream: Dict | None = None) -> ExtractResponse:
+def _build_response(
+    ad_id: str,
+    media: Dict,
+    features: Dict,
+    moondream: Dict | None = None,
+    gemini: Dict | None = None,
+    gemini_timeline: Dict | None = None,
+) -> ExtractResponse:
     media_model = MediaInfo(**media)
     features_model = ExtractFeatures(**features)
     md_block = MoondreamBlock(**moondream) if moondream else None
-    return ExtractResponse(ad_id=ad_id, media=media_model, features=features_model, moondream=md_block)
+    gemini_block = MoondreamBlock(**gemini) if gemini else None
+    timeline_block = GeminiTimeline(**gemini_timeline) if gemini_timeline else None
+
+    return ExtractResponse(
+        ad_id=ad_id,
+        media=media_model,
+        features=features_model,
+        moondream=md_block,
+        gemini=gemini_block,
+        gemini_timeline=timeline_block,
+    )
+
+
+def _run_gemini_image(data: bytes) -> Dict | None:
+    """Run Gemini image analysis if API key present."""
+    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
+        return None
+    try:
+        from extractor.gemini_image import analyze_image_bytes as gemini_analyze
+        return gemini_analyze(data)
+    except Exception as exc:
+        logger.warning("Gemini image analysis failed: %s", exc)
+        return None
+
+
+def _run_gemini_video(video_path: str) -> Dict | None:
+    """Run Gemini video analysis if API key present."""
+    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
+        return None
+    try:
+        from extractor.gemini_video import analyze_video
+        timeline = analyze_video(video_path)
+        if timeline is not None:
+            return timeline.model_dump()
+        return None
+    except Exception as exc:
+        logger.warning("Gemini video analysis failed: %s", exc)
+        return None
 
 
 def run_extraction(ad_id: str, data: bytes, modality: Literal["image", "video"], filename: str) -> ExtractResponse:
@@ -28,13 +72,16 @@ def run_extraction(ad_id: str, data: bytes, modality: Literal["image", "video"],
         bgr = decode_image_from_bytes(data)
         media, features = extract_from_image(bgr)
         md = None
+        gemini = None
         # Optionally call Moondream when api key present
         if os.getenv("MOONDREAM_API_KEY"):
             try:
                 md = analyze_image_bytes(data)
             except Exception:
                 md = None
-        return _build_response(ad_id, media, features, moondream=md)
+        # Run Gemini image analysis
+        gemini = _run_gemini_image(data)
+        return _build_response(ad_id, media, features, moondream=md, gemini=gemini)
 
     # video path
     video_path = write_temp_video_file(data, filename)
@@ -42,6 +89,12 @@ def run_extraction(ad_id: str, data: bytes, modality: Literal["image", "video"],
         media, features = extract_from_video(video_path)
 
         md = None
+        gemini = None
+        gemini_timeline = None
+
+        # Run Gemini video timeline analysis
+        gemini_timeline = _run_gemini_video(video_path)
+
         if os.getenv("MOONDREAM_API_KEY"):
             try:
                 cap = cv2.VideoCapture(video_path)
@@ -129,11 +182,22 @@ def run_extraction(ad_id: str, data: bytes, modality: Literal["image", "video"],
             except Exception:
                 md = None
 
-        return _build_response(ad_id, media, features, moondream=md)
+        # Also run Gemini image analysis on a representative frame for video
+        if not gemini:
+            try:
+                cap = cv2.VideoCapture(video_path)
+                ok, frame = cap.read()
+                cap.release()
+                if ok and frame is not None:
+                    ok2, buf = cv2.imencode('.jpg', frame)
+                    if ok2:
+                        gemini = _run_gemini_image(buf.tobytes())
+            except Exception:
+                pass
+
+        return _build_response(ad_id, media, features, moondream=md, gemini=gemini, gemini_timeline=gemini_timeline)
     finally:
         try:
             os.remove(video_path)
         except OSError:
             logger.debug("Failed to remove temp video file: %s", video_path)
-
-

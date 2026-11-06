@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const url = new URL("http://localhost:8000/brandmeta");
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    const url = new URL(`${backendUrl}/brandmeta`);
     // Forward all incoming search params; default provider=openai if not supplied
     const incoming = new URL(req.url);
     const sp = incoming.searchParams;

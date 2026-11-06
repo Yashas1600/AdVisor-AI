@@ -26,8 +26,8 @@ In Vercel dashboard, go to **Settings → Environment Variables** and add:
 
 #### Required Variables:
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://ltsnoprnomhaoilufuhb.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0c25vcHJub21oYW9pbHVmdWhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MjE2NzYsImV4cCI6MjA3Njk5NzY3Nn0.BXXSm0MBd8LgWFBbKtI0R8QNFuaaXxYq4nZxBnaNXhw
+NEXT_PUBLIC_SUPABASE_URL=<your-supabase-url>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-supabase-anon-key>
 ```
 
 **Note:** Only `NEXT_PUBLIC_*` variables are needed for the frontend. Backend variables (OPENAI_API_KEY, etc.) stay on your EC2 instance.
@@ -64,8 +64,8 @@ Frontend (Vercel)
   ↓
 Supabase (Authentication + Database)
   ↓
-Backend API (AWS EC2) - Optional for feature extraction
-  http://52.53.159.105:8000
+Backend API (EC2 or Cloud Run) - Optional for feature extraction
+  $NEXT_PUBLIC_BACKEND_URL
 ```
 
 ## Custom Domain (Optional)

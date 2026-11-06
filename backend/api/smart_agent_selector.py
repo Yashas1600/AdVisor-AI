@@ -1,13 +1,14 @@
 """
 Smart Agent Selection Service
 Selects relevant personas based on demographics and industry/interests alignment
-Uses OpenAI for intelligent semantic matching
+Uses the configured LLM provider for intelligent semantic matching
 """
 from typing import List, Dict, Any, Optional
+import asyncio
 import random
 import json
 from db.supabase_client import supabase_client
-from utils.openai_client import openai_client
+from llm import get_provider
 
 
 class SmartAgentSelector:
@@ -181,20 +182,49 @@ Be selective - only include personas with strong industry alignment."""
             user_prompt += f"{i}. ID: {p['id']}\n   {p['description']}\n\n"
 
         try:
-            # Call OpenAI
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1000,
-                response_format={"type": "json_object"}
-            )
+            provider = get_provider()
+            schema = {
+                "type": "object",
+                "properties": {
+                    "relevant_persona_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    }
+                },
+                "required": ["relevant_persona_ids"],
+            }
 
-            result_text = response.choices[0].message.content
-            result = json.loads(result_text)
+            # Run the async provider call from sync context
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run,
+                        provider.generate_json(
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            schema=schema,
+                            temperature=0.3,
+                            max_tokens=1000,
+                        ),
+                    ).result()
+            else:
+                result = asyncio.run(
+                    provider.generate_json(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        schema=schema,
+                        temperature=0.3,
+                        max_tokens=1000,
+                    )
+                )
+
             relevant_ids = result.get('relevant_persona_ids', [])
 
             # Return personas in order of relevance
@@ -205,11 +235,11 @@ Be selective - only include personas with strong industry alignment."""
                         matched.append(p['full_data'])
                         break
 
-            print(f"✓ OpenAI selected {len(matched)} industry-matched personas from {len(personas)} candidates")
+            print(f"LLM selected {len(matched)} industry-matched personas from {len(personas)} candidates")
             return matched
 
         except Exception as e:
-            print(f"Error using OpenAI for persona selection: {e}")
+            print(f"Error using LLM for persona selection: {e}")
             # Fallback to keyword matching
             return self._filter_by_industry_fallback(personas, industry_keywords)
 

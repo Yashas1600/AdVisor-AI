@@ -1,0 +1,11 @@
+[
+  {"name": "run_id", "type": "STRING", "mode": "REQUIRED", "description": "Foreign key to ad_runs"},
+  {"name": "persona_id", "type": "STRING", "mode": "REQUIRED", "description": "Persona identifier from Supabase"},
+  {"name": "community", "type": "STRING", "mode": "NULLABLE", "description": "Community display name the persona belongs to"},
+  {"name": "age_range", "type": "STRING", "mode": "NULLABLE", "description": "Persona age range (e.g. 18-24, 25-34)"},
+  {"name": "income_level", "type": "STRING", "mode": "NULLABLE", "description": "Persona income level (e.g. low, medium, high)"},
+  {"name": "attention", "type": "STRING", "mode": "REQUIRED", "description": "Attention level: full, partial, or ignore"},
+  {"name": "insight", "type": "STRING", "mode": "REQUIRED", "description": "Persona's reaction/insight text"},
+  {"name": "skip_at_seconds", "type": "FLOAT", "mode": "NULLABLE", "description": "For video ads: second at which persona would skip"},
+  {"name": "latency_ms", "type": "INTEGER", "mode": "NULLABLE", "description": "Time in milliseconds for this persona's analysis call"}
+]
